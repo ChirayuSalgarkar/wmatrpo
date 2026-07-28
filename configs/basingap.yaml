@@ -1,0 +1,37 @@
+# Basin-gap ablation (paper Table 4).
+# 2-agent game with basin_gap_factor swept by the script.
+
+env:
+  n_agents: 2
+  variances: [1.0, 3.0]
+  basin_gap_factor: 1.0          # overridden by `--ks` in basingap.py
+  linear_bias: 0.0
+
+policy:
+  init_mean: 1.5
+  init_std: 0.5
+
+critic:
+  hidden: 64
+  n_layers: 2
+  lr: 3.0e-3
+  n_update_epochs: 8
+
+dual_solver:
+  cost_type: l2
+
+caatr:
+  C: 0.02
+  epsilon_base: 1.0e-8
+  epsilon_max: 0.5
+  fallback_delta: 0.1
+
+algorithm:
+  batch_size: 30
+  seed: 0                        # overridden by `--seeds` in basingap.py
+
+trainer:
+  n_iterations: 2500             # paper uses 2500 for ablation
+  log_every: 250
+  save_outputs: true
+  run_dir: runs/basingap

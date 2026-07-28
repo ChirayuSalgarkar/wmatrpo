@@ -1,0 +1,37 @@
+# 3-agent differential game. Paper Table 2 column.
+
+env:
+  n_agents: 3
+  variances: [1.0, 3.0, 1.0]    # paper convention
+  basin_gap_factor: 1.0
+  linear_bias: 0.0
+
+policy:
+  init_mean: 1.5
+  init_std: 0.5
+  std_min: 0.1
+  std_max: 1.0          # cap σ at 2× init to prevent ratchet-up
+
+critic:
+  hidden: 64
+  n_layers: 2
+  lr: 3.0e-3
+  n_update_epochs: 8
+
+dual_solver:
+  cost_type: l2
+
+caatr:
+  C: 0.02
+  epsilon_base: 1.0e-8
+  epsilon_max: 0.5
+  fallback_delta: 0.1
+
+algorithm:
+  batch_size: 30
+  seed: 0
+
+trainer:
+  n_iterations: 4000
+  log_every: 200
+  run_dir: runs/diffgame_3agent

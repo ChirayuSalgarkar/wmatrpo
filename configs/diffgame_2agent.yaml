@@ -1,0 +1,45 @@
+# Differential game with 2 agents (paper §5.1).
+# Reference: Table 2 of the paper (using 3-agent column as the 2-agent
+# values aren't separately tabulated; the paper presents results for
+# 3, 5, 7, 9 in Table 3).
+
+env:
+  n_agents: 2
+  variances: [1.0, 3.0]        # paper convention: σ_1 = 1, σ_2 = 3
+  basin_gap_factor: 1.0
+  linear_bias: 0.0
+  action_low: 0.0
+  action_high: 7.0
+
+policy:
+  init_mean: 1.5
+  init_std: 0.5
+  std_min: 0.05
+  std_max: 3.0
+
+critic:
+  hidden: 64
+  n_layers: 2
+  lr: 3.0e-3
+  n_update_epochs: 8
+  gamma: 0.0
+
+dual_solver:
+  lambda_min: 1.0e-4
+  lambda_max: 50.0
+  cost_type: l2
+
+caatr:
+  C: 0.02                       # paper Table 2 (3-agent column)
+  epsilon_base: 1.0e-8
+  epsilon_max: 0.5
+  fallback_delta: 0.1
+
+algorithm:
+  batch_size: 30
+  seed: 0
+
+trainer:
+  n_iterations: 4000
+  log_every: 200
+  run_dir: runs/diffgame_2agent
