@@ -95,7 +95,16 @@ class WMATRPO:
         # --- Step 15 (moved earlier to ensure fresh advantages): update critic ---
         critic_info = self.critic.update(batch)
 
-        # --- Step 4: compute trust regions via CAATR ---
+        # --- Step 4: compute trust regions via CAATR (or an allocation strategy) ---
+        # Greedy/Weighted allocation strategies need per-agent mean advantages;
+        # feed them if the radius rule exposes the hook (CAATR does not).
+        if hasattr(self.caatr, "set_advantages"):
+            avg_adv = []
+            for i in range(self.n_agents):
+                a_i = self.critic.per_agent_advantage(
+                    batch["states"], batch["actions"], agent_id=i).detach()
+                avg_adv.append(float(a_i.mean().item()))
+            self.caatr.set_advantages(avg_adv)
         deltas = self.caatr.compute_deltas()  # length N
 
         # --- Step 5: random agent ordering ---

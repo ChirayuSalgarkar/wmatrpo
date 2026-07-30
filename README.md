@@ -4,7 +4,7 @@ Clean reimplementation of the W-MATRPO + CAATR algorithm from
 
 > Salgarkar, Bailey, Alm, Baheri. *Wasserstein-Constrained Trust Region Optimization for Cooperative Multi-Agent Reinforcement Learning.*
 
-This implementation is **faithful to the paper's algorithm description**, as a corrective to the simplifications present in the original `SAILRIT/TRPOMARL` repo. The specific differences are listed in the table below. The reported baseline comparisons (reviewer R2.4) and the σ-inflation / non-convergence diagnosis (reviewer R2.3) were produced with this implementation; running the scripts below regenerates them from scratch.
+This implementation is **faithful to the paper's algorithm description** as a corrective to the simplifications present in the original `SAILRIT/TRPOMARL` repo (see `paper1_code_audit.md` in the parent folder for details).
 
 ## What's different from the original repo
 
@@ -39,19 +39,36 @@ for n in 2 3 5 7 9; do
 done
 
 # head-to-head baselines: W-MATRPO vs IPPO vs MAPPO vs HAPPO  (reviewer R2.4)
-python -m wmatrpo.tests.test_baselines_smoke          # verify all four run first
+python -m wmatrpo.tests.test_baselines_smoke          # verify all algorithms run first
 python -m wmatrpo.scripts.baselines --quick           # fast sanity sweep (3 agents, 1 seed)
-python -m wmatrpo.scripts.baselines --agent-counts 3 5 7 9 --seeds 0 1 2   # full table
+python -m wmatrpo.scripts.baselines --agent-counts 3 5 7 9 --seeds 0 1 2   # full R2.4 table
+
+# main-results table (Table 3): Standard HATRPO vs HATRPO+CAATR vs W-MATRPO+CAATR
+python -m wmatrpo.scripts.baselines --algorithms hatrpo hatrpo_caatr wmatrpo \
+    --agent-counts 3 5 7 9 --seeds 0 1 2 --out runs/table3
+
+# basin-gap allocation comparison (Table 5): Fixed / Greedy / Weighted / +CAATR
+python -m wmatrpo.scripts.basingap_compare --ks 0.5 1.0 1.5 2.0 --seeds 0 1 2
 ```
 
-## Baselines (IPPO / MAPPO / HAPPO)
+## Baselines and comparison algorithms
 
-All three PPO-family baselines share the env, batch size, centralized critic, and
-policy init with W-MATRPO, so the comparison isolates the policy-update rule:
+Every comparison algorithm shares the env, batch size, centralized critic, and
+policy init with W-MATRPO, so each comparison isolates a single design choice.
+
+**PPO-family baselines (Table 4 / reviewer R2.4):**
 
 - **IPPO** (`ippo.py`) — independent PPO; runs with a centralized or decentralized critic.
-- **MAPPO** (`mappo.py`) — concurrent PPO with a centralized critic (Yu et al. 2021).
-- **HAPPO** (`happo.py`) — sequential PPO with importance-sampling correction (Kuba et al. 2021); the closest KL-based cousin to W-MATRPO's sequential+IS structure, with PPO clip replacing the Wasserstein dual.
+- **MAPPO** (`mappo.py`) — concurrent PPO with a centralized critic (Yu et al. 2021/2022).
+- **HAPPO** (`happo.py`) — sequential PPO with importance-sampling correction (Kuba et al. 2021); the closest PPO cousin to W-MATRPO's sequential+IS structure, with the PPO clip replacing the Wasserstein dual.
+
+**KL-trust-region comparison (Table 3 / main results):**
+
+- **HATRPO** (`hatrpo.py`) — Heterogeneous-Agent TRPO (Kuba et al. 2021): the *same* sequential+IS machinery as W-MATRPO, but each agent takes a natural-gradient step under a hard KL trust region (conjugate gradient + Fisher-vector products + backtracking line search) instead of the Wasserstein dual solve. Selected as `hatrpo` (fixed KL radius) or `hatrpo_caatr` (CAATR-adaptive radius) in `scripts/baselines.py`. This is the cleanest controlled contrast: swap the *geometry* of the trust region (KL vs Wasserstein) and hold everything else fixed. On the differential game the KL constraint keeps HATRPO trapped in the local optimum (distance ≈ 4√N), reproducing the paper's Standard-HATRPO / HATRPO+CAATR rows; W-MATRPO's Wasserstein constraint escapes.
+
+**Trust-region allocation strategies (Table 5 / basin-gap ablation):**
+
+- **`allocation.py`** — the Fixed / Greedy / Weighted budget-allocation rules ported faithfully from the original repo, re-expressed behind the same interface as CAATR so any of them drops into W-MATRPO's radius slot. `scripts/basingap_compare.py` sweeps k ∈ {0.5,1,1.5,2} × {fixed, greedy, weighted, caatr} on the 2-agent game and writes `basingap_summary.csv` (mean±s.d. over seeds).
 
 `scripts/baselines.py` produces `baselines_raw.csv`, `baselines_summary.csv`
 (mean±std over seeds), and `baselines_pivot.csv` (distance-to-global, algorithm × N).
@@ -83,13 +100,25 @@ wmatrpo/
     ├── policy.py              # GaussianPolicy with closed-form W₁ / W₂
     ├── critic.py              # V and Q networks (small MLPs)
     ├── dual_solver.py         # Theorem 1 + Remark 1 + Corollary 1
-    ├── caatr.py               # Algorithm 2
+    ├── caatr.py               # Algorithm 2 (Coordination-Aware Adaptive Trust Region)
+    ├── allocation.py          # Fixed/Greedy/Weighted radius allocation (Table 5)
     ├── algorithm.py           # Algorithm 1 (Sequential + IS)
+    ├── happo.py               # HAPPO baseline (Kuba 2021, PPO clip)
+    ├── hatrpo.py              # HATRPO comparison (Kuba 2021, KL trust region)
+    ├── ippo.py / mappo.py     # PPO-family baselines
     ├── trainer.py             # train loop + logging
     ├── utils.py               # seeding, config loading
-    └── scripts/
-        ├── train.py           # CLI entry point
-        └── basingap.py        # Table 4 ablation runner
+    ├── scripts/
+    │   ├── train.py           # CLI entry point
+    │   ├── baselines.py       # Table 3 (hatrpo/hatrpo_caatr/wmatrpo) + Table 4 (R2.4) sweeps
+    │   ├── basingap.py        # basin-gap runner (W-MATRPO+CAATR only)
+    │   └── basingap_compare.py# Table 5 allocation-strategy comparison
+    └── tests/
+        ├── test_wasserstein.py
+        ├── test_dual_solver.py
+        ├── test_hatrpo.py         # KL-constraint + local-optimum-trap checks
+        ├── test_allocation.py     # budget-conservation + ranking checks
+        └── test_baselines_smoke.py
 ```
 
 ## Tracing the paper to the code
@@ -109,6 +138,9 @@ Every load-bearing equation/algorithm in the paper maps to a specific file:
 - Proposition 1 (surrogate bound): not a function — but the surrogate value is logged in `trainer.py`
 - Algorithm 1 (W-MATRPO with CAATR): `algorithm.py:WMATRPO.step`
 - Algorithm 2 (CAATR update): `caatr.py:CAATR.compute_deltas`
+- Table 3 (main results — HATRPO / HATRPO+CAATR / W-MATRPO+CAATR): `hatrpo.py` + `scripts/baselines.py` (algorithms `hatrpo`, `hatrpo_caatr`, `wmatrpo`)
+- Table 4 (R2.4 — W-MATRPO vs IPPO/MAPPO/HAPPO): `ippo.py`, `mappo.py`, `happo.py` + `scripts/baselines.py`
+- Table 5 (basin-gap — Fixed/Greedy/Weighted/+CAATR): `allocation.py` + `scripts/basingap_compare.py`
 
 ## Sanity checks (run before trusting results)
 

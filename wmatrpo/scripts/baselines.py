@@ -39,6 +39,7 @@ from wmatrpo.algorithm import WMATRPO, WMATRPOConfig
 from wmatrpo.ippo import IPPO, IPPOConfig
 from wmatrpo.mappo import MAPPO, MAPPOConfig
 from wmatrpo.happo import HAPPO, HAPPOConfig
+from wmatrpo.hatrpo import HATRPO, HATRPOConfig
 from wmatrpo.utils import set_seed
 
 
@@ -97,6 +98,21 @@ def build_algo(name: str, env, seed: int, batch_size: int):
         return HAPPO.from_config(env, HAPPOConfig(batch_size=batch_size,
                                                   n_agents=env.n_agents, seed=seed),
                                  policy_cfg, critic)
+    elif name == "hatrpo":
+        # Standard HATRPO: KL trust region, fixed radius δ (Kuba 2021).
+        return HATRPO.from_config(
+            env, HATRPOConfig(batch_size=batch_size, n_agents=env.n_agents,
+                              delta=0.01, seed=seed, use_caatr=False),
+            policy_cfg, critic)
+    elif name == "hatrpo_caatr":
+        # HATRPO with CAATR-adaptive per-agent radii (same C schedule as W-MATRPO).
+        caatr = CAATR(CAATRConfig(C=CAATR_C.get(env.n_agents, 0.02),
+                                  epsilon_base=1e-8, epsilon_max=0.5,
+                                  fallback_delta=0.1), env.n_agents)
+        return HATRPO.from_config(
+            env, HATRPOConfig(batch_size=batch_size, n_agents=env.n_agents,
+                              delta=0.01, seed=seed, use_caatr=True),
+            policy_cfg, critic, caatr=caatr)
     else:
         raise ValueError(f"unknown algorithm: {name}")
 
