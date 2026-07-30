@@ -28,7 +28,8 @@ def _run(name: str, n_agents: int = 3, n_iters: int = 60) -> dict:
 def main():
     print("=== Baseline smoke test (3 agents, 60 iterations each) ===\n")
     results = {}
-    for name in ["ippo", "mappo", "happo", "hatrpo", "hatrpo_caatr", "wmatrpo"]:
+    for name in ["ippo", "mappo", "happo", "hatrpo", "hatrpo_caatr",
+                 "wmatrpo_fixed", "wmatrpo"]:
         try:
             r = _run(name)
             ok = r["moved"] > 0.05

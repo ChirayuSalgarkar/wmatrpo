@@ -66,6 +66,11 @@ policy init with W-MATRPO, so each comparison isolates a single design choice.
 
 - **HATRPO** (`hatrpo.py`) — Heterogeneous-Agent TRPO (Kuba et al. 2021): the *same* sequential+IS machinery as W-MATRPO, but each agent takes a natural-gradient step under a hard KL trust region (conjugate gradient + Fisher-vector products + backtracking line search) instead of the Wasserstein dual solve. Selected as `hatrpo` (fixed KL radius) or `hatrpo_caatr` (CAATR-adaptive radius) in `scripts/baselines.py`. This is the cleanest controlled contrast: swap the *geometry* of the trust region (KL vs Wasserstein) and hold everything else fixed. On the differential game the KL constraint keeps HATRPO trapped in the local optimum (distance ≈ 4√N), reproducing the paper's Standard-HATRPO / HATRPO+CAATR rows; W-MATRPO's Wasserstein constraint escapes.
 
+**W-MATRPO variants (CAATR ablation):**
+
+- **`wmatrpo`** — W-MATRPO with the coordination-aware adaptive trust region (CAATR); the full proposed method.
+- **`wmatrpo_fixed`** — W-MATRPO with a **fixed** (non-adaptive) trust-region radius in place of CAATR. Identical Wasserstein dual solve, critic, and initialization; only the radius rule differs. Running both across N isolates CAATR's marginal contribution from the underlying Wasserstein geometry — i.e. it separates "does optimal-transport geometry help?" from "does making its radius adaptive help?". Both selectable in `scripts/baselines.py`.
+
 **Trust-region allocation strategies (Table 5 / basin-gap ablation):**
 
 - **`allocation.py`** — the Fixed / Greedy / Weighted budget-allocation rules ported faithfully from the original repo, re-expressed behind the same interface as CAATR so any of them drops into W-MATRPO's radius slot. `scripts/basingap_compare.py` sweeps k ∈ {0.5,1,1.5,2} × {fixed, greedy, weighted, caatr} on the 2-agent game and writes `basingap_summary.csv` (mean±s.d. over seeds).

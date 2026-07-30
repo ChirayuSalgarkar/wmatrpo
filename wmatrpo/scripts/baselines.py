@@ -35,6 +35,7 @@ from wmatrpo.policy import GaussianPolicy, PolicyConfig
 from wmatrpo.critic import CentralizedCritic, CriticConfig
 from wmatrpo.dual_solver import DualSolver, DualSolverConfig
 from wmatrpo.caatr import CAATR, CAATRConfig
+from wmatrpo.allocation import AllocationStrategy, AllocationConfig
 from wmatrpo.algorithm import WMATRPO, WMATRPOConfig
 from wmatrpo.ippo import IPPO, IPPOConfig
 from wmatrpo.mappo import MAPPO, MAPPOConfig
@@ -86,6 +87,20 @@ def build_algo(name: str, env, seed: int, batch_size: int):
             env=env, alg_cfg=WMATRPOConfig(batch_size=batch_size,
                                            n_agents=env.n_agents, seed=seed),
             policy_cfg=policy_cfg, critic=critic, dual_solver=dual, caatr=caatr)
+    elif name == "wmatrpo_fixed":
+        # W-MATRPO with a FIXED (non-adaptive) trust-region radius instead of CAATR.
+        # Same Wasserstein dual solve, critic, and init as `wmatrpo`; the only
+        # difference is the radius rule (fixed budget vs coordination-aware adaptive).
+        # This isolates CAATR's marginal contribution on top of the W-MATRPO geometry.
+        dual = DualSolver(DualSolverConfig(
+            lambda_min=1e-4, lambda_max=50.0,
+            action_low=env.action_low, action_high=env.action_high, cost_type="l2"))
+        fixed = AllocationStrategy(
+            AllocationConfig(method="fixed", epsilon_total=0.1), env.n_agents)
+        return WMATRPO.from_config(
+            env=env, alg_cfg=WMATRPOConfig(batch_size=batch_size,
+                                           n_agents=env.n_agents, seed=seed),
+            policy_cfg=policy_cfg, critic=critic, dual_solver=dual, caatr=fixed)
     elif name == "ippo":
         return IPPO.from_config(env, IPPOConfig(batch_size=batch_size,
                                                 n_agents=env.n_agents, seed=seed),
