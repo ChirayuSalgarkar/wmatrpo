@@ -117,9 +117,12 @@ class WMATRPO:
         updated_agents: List[int] = []
         info_per_agent: List[dict] = [{} for _ in range(self.n_agents)]
         for k_idx, agent_i in enumerate(order):
-            # eq. 15: importance-corrected advantages over previously updated agents
-            adv = self._is_corrected_advantage(batch, updated_agents, old_policies)
-            solver_batch = {**batch, "advantages": adv}
+            # eq. 15: importance weights over previously updated agents. These are
+            # passed as weights (not as a pre-multiplied advantage) so the solver
+            # can apply them inside both the action gradient and the dual
+            # objective; passing a product would leave the gradient uncorrected.
+            is_w = self._is_weights(batch, updated_agents, old_policies)
+            solver_batch = {**batch, "is_weights": is_w}
 
             new_mean, new_std, lambda_star, info = self.dual_solver.solve(
                 agent_id=agent_i,
@@ -219,6 +222,34 @@ class WMATRPO:
             sig_old + alpha * (new_std - sig_old),
         )
 
+    def _is_weights(
+        self,
+        batch: dict,
+        updated_agents: Sequence[int],
+        old_policies: Sequence[GaussianPolicy],
+    ) -> torch.Tensor:
+        """
+        Importance ratios of eq. 15, returned as weights:
+
+            w(s,a) = ∏_{k ∈ U_k} π_k^new(a_k|o_k) / π_k^old(a_k|o_k)
+
+        so that M_i(s,a) = A^π_old(s,a) · w(s,a). The solver applies w inside the
+        action gradient and the dual objective; returning w rather than the
+        product A·w is what lets the correction reach ∇_{a_i}.
+        """
+        with torch.no_grad():
+            B = batch["actions"].shape[0]
+            if not updated_agents:
+                return torch.ones(B, dtype=batch["actions"].dtype)
+            log_ratio = torch.zeros(B, dtype=batch["actions"].dtype)
+            for k in updated_agents:
+                ak = batch["actions"][:, k]
+                log_ratio = log_ratio + self.policies[k].log_prob(ak) \
+                                       - old_policies[k].log_prob(ak)
+            # numerical-stable importance ratio
+            log_ratio = torch.clamp(log_ratio, min=-10.0, max=10.0)
+            return torch.exp(log_ratio)
+
     def _is_corrected_advantage(
         self,
         batch: dict,
@@ -227,20 +258,13 @@ class WMATRPO:
     ) -> torch.Tensor:
         """
         Eq. 15:  M_i(s, a) = A^π_old(s, a) · ∏_{k ∈ U_k} π_k^new(a_k|s) / π_k^old(a_k|s)
+
+        Retained for diagnostics and tests; the update path uses `_is_weights`.
         """
         with torch.no_grad():
             A = self.critic.advantage(batch["states"], batch["actions"])
-            if not updated_agents:
-                return A
-            log_ratio = torch.zeros_like(A)
-            for k in updated_agents:
-                ak = batch["actions"][:, k]
-                log_ratio = log_ratio + self.policies[k].log_prob(ak) \
-                                       - old_policies[k].log_prob(ak)
-            # numerical-stable importance ratio
-            log_ratio = torch.clamp(log_ratio, min=-10.0, max=10.0)
-            ratio = torch.exp(log_ratio)
-            return A * ratio
+            w = self._is_weights(batch, updated_agents, old_policies)
+            return A * w
 
     # =========================================================================
     # Convenience constructors

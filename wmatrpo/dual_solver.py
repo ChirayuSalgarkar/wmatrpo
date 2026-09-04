@@ -48,6 +48,7 @@ class DualSolverConfig:
     action_low: float = 0.0
     action_high: float = 7.0
     cost_type: str = "l2"          # "l2" → c(a,a') = (a - a')² ; "l1" → |a-a'|
+    use_is_weights: bool = True    # let eq.-15 IS weights enter grad + dual obj
     fallback_std: float = 0.5      # used when pushforward samples have ~0 spread
 
 
@@ -72,8 +73,11 @@ class DualSolver:
         Args:
             agent_id:   index of the agent being updated
             batch:      dict with 'states' (B, state_dim), 'actions' (B, N),
-                        and optionally 'advantages' (B,) — if provided, used
-                        as the per-sample advantage (e.g., after IS correction).
+                        and optionally 'is_weights' (B,) — the eq.-15 importance
+                        ratios over already-updated teammates. When present (and
+                        cfg.use_is_weights), they reweight the teammate
+                        expectation in BOTH the action gradient and the dual
+                        objective, so they influence λ* and the new policy.
             critic:     CentralizedCritic
             policy_old: GaussianPolicy (frozen snapshot)
             delta_i:    trust-region radius for this agent
@@ -85,20 +89,29 @@ class DualSolver:
         a = batch["actions"]
         B, N = a.shape
 
-        # ---- per-sample ∇_{a_i} A(s, a) ----
-        # autograd through the critic's Q
+        # ---- importance-sampling weights over already-updated teammates ----
+        # w(s,a) = ∏_{k ∈ U} π_k^new(a_k|o_k) / π_k^old(a_k|o_k)   (eq. 15)
+        # These reweight the teammate expectation so that the inner objective is
+        #   Ā_i(s,a'_i) = E_{a_{-i}~π_{-i}^new}[A] ≈ E_{a_{-i}~π_{-i}^old}[w · A],
+        # i.e. the teammate average is taken over the *already updated* policies.
+        # w enters BOTH the action gradient (here) and the dual objective (below),
+        # so the correction measurably influences λ* and the resulting policy.
+        if self.cfg.use_is_weights and "is_weights" in batch:
+            w = batch["is_weights"].detach().reshape(-1).to(a.dtype)
+            w_mean = float(w.mean().item())
+            if w_mean > 1e-8:          # self-normalize so λ, δ keep their scale
+                w = w / w_mean
+        else:
+            w = torch.ones(B, dtype=a.dtype)
+
+        # ---- per-sample ∇_{a_i} (w · A)(s, a) ----
+        # w is a detached constant, so this is w_b · ∇_{a_i} A_b: the gradient of
+        # the IS-reweighted (teammate-averaged) advantage.
         a_grad = a.clone().detach().requires_grad_(True)
         adv = critic.advantage(s, a_grad)            # (B,)
-        adv_sum = adv.sum()
-        grad = torch.autograd.grad(adv_sum, a_grad)[0]  # (B, N)
+        weighted_sum = (w * adv).sum()
+        grad = torch.autograd.grad(weighted_sum, a_grad)[0]  # (B, N)
         grad_i = grad[:, agent_id].detach()           # (B,)
-
-        # we use the actual advantage from the critic, unless caller supplied
-        # IS-corrected advantages (see eq. 15)
-        if "advantages" in batch:
-            adv = batch["advantages"].detach()
-        else:
-            adv = adv.detach()
 
         a_i = a[:, agent_id].detach()                 # (B,)
         a_other = a.detach()                          # (B, N)  for re-eval at a'
@@ -118,7 +131,9 @@ class DualSolver:
             with torch.no_grad():
                 A_star = critic.advantage(s, a_joint)
                 cost = self._cost(a_i, a_star)
-                phi = A_star - lam * cost
+                # IS-reweighted advantage: the teammate expectation inside Φ is
+                # taken under the updated teammate policies (eq. 15).
+                phi = w * A_star - lam * cost
             return lam * float(delta_i) + float(phi.mean().item())
 
         result = minimize_scalar(
