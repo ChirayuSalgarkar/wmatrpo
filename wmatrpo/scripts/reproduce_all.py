@@ -53,12 +53,19 @@ def _run(argv: list[str], log_path: Path) -> dict:
     """Run a stage, stream to console and tee to a log file."""
     print(f"\n$ {' '.join(argv)}", flush=True)
     t0 = time.time()
+    # -u on the child and an explicit flush on every line: without both, a long
+    # sweep shows no progress for hours because stdout is block-buffered when it
+    # is a pipe or a redirected file rather than a tty.
+    if argv[1:2] == ["-m"]:
+        argv = [argv[0], "-u", *argv[1:]]
     with open(log_path, "w") as log:
         proc = subprocess.Popen(argv, cwd=REPO_ROOT, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, bufsize=1)
         for line in proc.stdout:
             sys.stdout.write(line)
+            sys.stdout.flush()
             log.write(line)
+            log.flush()
         proc.wait()
     dt = time.time() - t0
     return {"argv": argv, "returncode": proc.returncode,
